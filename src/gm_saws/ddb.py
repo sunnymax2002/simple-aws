@@ -179,6 +179,8 @@ class SingleTable:
             #     if issubclass(t, bytes):
             #         self.table_field_type_overrides[key] = BINARY
         
+    def get_entity_map(self, entity: PydanticBaseModel):
+        return self.entity_map[entity.__name__]
     
     def createTable(self, forceCreate=False):
         keySchema = []
@@ -287,7 +289,7 @@ class SingleTable:
         """Adds a table row based on specified key map. Pickles the item before saving and adds it to attribute=data.
         If delay is specified, sleeps for delay milli-seconds before returning, and this can be used to control write-capacity usage"""
 
-        # Copy the key-map and add pickled data
+        # TODO: (deep, to avoid key_map from getting modified) Copy the key-map and add pickled data
         table_row = key_map.copy()
         pickled = pickle.dumps(item)
         table_row['data'] = pickled
@@ -359,8 +361,10 @@ class SingleTable:
         if not self.schema_locked:
             raise Exception('Schema not locked')
         
-        # Pickle the data and store
-        table_row = {'data': pickle.dumps(item)}
+        # This is now done by put_raw()
+        # # Pickle the data and store
+        # table_row = {'data': pickle.dumps(item)}
+        table_row = {}
 
         cls_name = item.__class__.__name__
         if cls_name in self.entity_map:
@@ -415,7 +419,7 @@ class SingleTable:
             # print(f'WIP: {tbl_key}, {expr}, {constraints}, {attribs}')
             # for attrib in attribs:
             #     qTerm = constraints[attrib]
-            return None
+            raise NotImplementedError('Queries with complex expression containing multiple attributes not supported yet.')
             
 
     def query(self, entity: PydanticBaseModel, constraints: Dict[str, QueryTerm], limit: int = None):
@@ -459,14 +463,37 @@ class SingleTable:
                 # tbl_col fully specified
                 keyExpr = self._build_QueryExpr(cls_name, tbl_col, expr, constraints, attribs)
                 query_expressions[tbl_col] = keyExpr
-                if keyCondExpr is None:
-                    keyCondExpr = keyExpr
-                else:
-                    keyCondExpr = keyCondExpr & keyExpr
             else:
-                # Find which attributes not constrained for this tbl_col
-                unconstrained = set(attribs).difference(constrained_attribs)
-                raise NotImplementedError(f'Partially specified queries not supported yet {unconstrained}')
+                # Try to build a starts-with expr - check if intersecting attributes match initial sub-list of attribs
+                len_intersect = len(intersect_)
+                sub_attrib_list = attribs[:len_intersect]
+                if set(sub_attrib_list) == intersect_:
+                    # Evaluate sub-expr
+                    splittor = f'{len_intersect}'
+                    sub_expr: str = expr.split('{' + splittor + '}')[0]
+
+                    # Check that specified query for intersect_ attributes is EQ, and during the check, build arg-list
+                    arg_list = []
+                    for attr in sub_attrib_list:
+                        qt = constraints[attr]
+                        if qt.match_type == QueryConditionType.EQ:
+                            arg_list.append(self._get_db_val_from_raw(qt.match_value))
+                        else:
+                            raise NotImplementedError(f'Partially specified query supported only for EQ type constraints')
+
+                    eval_match_val = sub_expr.format(*arg_list).replace('@ClassName', cls_name)
+                    keyExpr = Key(tbl_col).begins_with(eval_match_val)
+                    query_expressions[tbl_col] = keyExpr
+                    # print(eval_match_val)
+                else:
+                    # Find which attributes not constrained for this tbl_col
+                    unconstrained = set(attribs).difference(constrained_attribs)
+                    raise NotImplementedError(f'Partially specified queries not supported yet, {unconstrained} attributes not specified, and also unable to form a begins-with query since constrained attributes do not match a sublist of entity-map')
+            
+            if keyCondExpr is None:
+                keyCondExpr = keyExpr
+            else:
+                keyCondExpr = keyCondExpr & keyExpr
         
         # Get the index to query on
         for idx, keyInfo in self.indices_keys.items():
