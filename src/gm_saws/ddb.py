@@ -2,7 +2,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Dict, List, Any
 from pydantic import BaseModel as PydanticBaseModel
-from boto3.dynamodb.types import STRING, NUMBER, BINARY
+from boto3.dynamodb.types import STRING, NUMBER, BINARY, TypeSerializer, TypeDeserializer
 import boto3
 from boto3.dynamodb.conditions import Key
 import pickle
@@ -116,6 +116,10 @@ class SingleTable:
 
         # Entity.attribute to table.key map
         self.reverse_map = {}
+
+        # Boto3 serializer and deserializer
+        self.serializer = TypeSerializer()
+        self.deserializer = TypeDeserializer()
 
 
     def add_key(self, index: str, indexType: IndexType, key: str, type: KeyType, dataType: str = STRING, rcu: int = 1, wcu: int = 1):
@@ -284,22 +288,56 @@ class SingleTable:
         val = expr.format(*str_val_list).replace('@ClassName', cls_name)
         return val
 
+    def _float_to_decimal(self, v):
+        return Decimal(v) if isinstance(v, float) else v
+        
+    def item_2_ddb(self, item: type):
+        # Pickle the item get ddb compatible type
+        pickled = pickle.dumps(item)
+        # Now serialize to store in ddb
+        ddb_item = self.serializer.serialize(pickled)
+        # boto3_serialize = False
+        # if boto3_serialize:
+        #     item_dict = item.model_dump()
+        #     ddb_item = {}
+        #     for k, v in item_dict.items():
+        #         ddb_item[k] = serializer.serialize(self._float_to_decimal(v))
+        return ddb_item
+    
+    def ddb_2_item(self, ddb_item):
+        try:
+            # Somehow ddb item is returned as Binary, convert to bytes
+            if isinstance(ddb_item, dict):
+                ddb_item = {'B': bytes(ddb_item['B'])}
+            else:
+                # only the binary item, convert to dict
+                ddb_item = {'B': bytes(ddb_item)}
+            # De-serialize to pickled, and then un-pickle
+            pickled = bytes(self.deserializer.deserialize(ddb_item))
+            # Un-pickle
+            item = pickle.loads(pickled)
+            return item
+        except Exception as e:
+            # TODO: log error
+            return None
 
-    def put_raw(self, key_map: dict, item: type, delay: int = None):
+    def put_raw(self, key_map: dict, item: PydanticBaseModel, delay: int = None):
         """Adds a table row based on specified key map. Pickles the item before saving and adds it to attribute=data.
         If delay is specified, sleeps for delay milli-seconds before returning, and this can be used to control write-capacity usage"""
 
         # TODO: (deep, to avoid key_map from getting modified) Copy the key-map and add pickled data
         table_row = key_map.copy()
-        pickled = pickle.dumps(item)
-        table_row['data'] = pickled
+
+        table_row['data'] = self.item_2_ddb(item)
 
         # Write to table
-        item_size = sys.getsizeof(pickled)
+        item_size = sys.getsizeof(table_row['data'])
         # print(type(item), key_map)
 
         print('Writing item into database...')
         st = time.perf_counter()
+
+        # TODO: check if any error in writing to ddb
         response = self.table.put_item(Item=table_row)
         print('Time taken to write item: {:6.3f} seconds'.format(time.perf_counter() - st))
         # print(response)
@@ -330,8 +368,9 @@ class SingleTable:
         # response = self.table.query(KeyConditionExpression=expr)
 
         if response['ResponseMetadata']['HTTPStatusCode'] == 200 and 'Item' in response:
-            pickled = response['Item']['data']
-            return pickle.loads(pickled.__bytes__())
+            ddb_item = response['Item']['data']
+            item = self.ddb_2_item(ddb_item)
+            return item
 
         # Not found
         return None
@@ -381,7 +420,7 @@ class SingleTable:
             self.put_raw(key_map=table_row, item=item, delay=delay)
         else:
             raise ValueError(f'Map {cls_name} table before adding items')
-    
+                
 
     @classmethod
     def _build_QueryExpr(cls, cls_name, tbl_key, expr: str, constraints: Dict[str, QueryTerm], attribs):
@@ -412,6 +451,18 @@ class SingleTable:
                     # No match
                     return True
         else:
+            # Case when attribs count same as expr vars AND query type = EQ
+            arg_list = []
+            for attrib in attribs:
+                qTerm = constraints[attrib]
+                if qTerm.match_type == QueryConditionType.EQ:
+                    arg_list.append(cls._get_db_val_from_raw(qTerm.match_value))
+
+            # Try to evaluate expression if every attrib was added to arg_list
+            if len(attribs) == len(arg_list):
+                eval_match_val = expr.format(*arg_list).replace('@ClassName', cls_name)
+                return Key(tbl_key).eq(eval_match_val)
+            
             # Check if query type is same for each attrib
             # Get list of constrained value to be used with expr
 
@@ -450,7 +501,7 @@ class SingleTable:
 
         # Iterate through table columns and check if a mapping attributes is constrained?
         for tbl_col, value in self.entity_map[cls_name].items():
-            expr = value[0]
+            expr: str = value[0]
             attribs = value[1]
 
             # Check if attrib_list fully specified by constraints or not, get intersection
@@ -514,8 +565,10 @@ class SingleTable:
                 # Convert to entity list and return
                 if response['ResponseMetadata']['HTTPStatusCode'] == 200 and 'Items' in response:
                     result = []
-                    for item in response['Items']:
-                        pickled = item['data']
-                        result.append(pickle.loads(pickled.__bytes__()))
+                    for ddb_item in response['Items']:
+                        item = self.ddb_2_item(ddb_item['data'])
+                        # Add if not None
+                        if item is not None:
+                            result.append(item)
 
                     return result
