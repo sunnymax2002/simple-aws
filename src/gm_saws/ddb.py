@@ -304,7 +304,7 @@ class SingleTable:
         #         ddb_item[k] = serializer.serialize(self._float_to_decimal(v))
         return ddb_item
     
-    def ddb_2_item(self, ddb_item):
+    def ddb_2_item(self, ddb_item, entity: PydanticBaseModel = None):
         try:
             # Somehow ddb item is returned as Binary, convert to bytes
             if isinstance(ddb_item, dict):
@@ -316,6 +316,10 @@ class SingleTable:
             pickled = bytes(self.deserializer.deserialize(ddb_item))
             # Un-pickle
             item = pickle.loads(pickled)
+
+            # TODO: If entity specified, check if item has all fields required in entity, else fill with defaults - this is useful when newer fields are added since item was stored in db
+            # validated_item = entity.model_validate(item, )
+
             return item
         except Exception as e:
             # TODO: log error
@@ -337,8 +341,8 @@ class SingleTable:
         print('Writing item into database...')
         st = time.perf_counter()
 
-        # TODO: check if any error in writing to ddb
         response = self.table.put_item(Item=table_row)
+        
         print('Time taken to write item: {:6.3f} seconds'.format(time.perf_counter() - st))
         # print(response)
         # print()
@@ -566,7 +570,7 @@ class SingleTable:
                 if response['ResponseMetadata']['HTTPStatusCode'] == 200 and 'Items' in response:
                     result = []
                     for ddb_item in response['Items']:
-                        item = self.ddb_2_item(ddb_item['data'])
+                        item = self.ddb_2_item(ddb_item['data'], entity)
                         # Add if not None
                         if item is not None:
                             result.append(item)
