@@ -477,7 +477,7 @@ class SingleTable:
             raise NotImplementedError('Queries with complex expression containing multiple attributes not supported yet.')
             
 
-    def query(self, entity: PydanticBaseModel, constraints: Dict[str, QueryTerm], limit: int = None):
+    def query(self, entity: PydanticBaseModel, constraints: Dict[str, QueryTerm], limit: int = 0):
         """
         Queries the db to find entity_class instances based on conditions specified
 
@@ -560,9 +560,9 @@ class SingleTable:
                 # Perform the query
                 # TODO: add limit
                 if idx != self.PRIMARY:
-                    response = self.table.query(IndexName=idx, KeyConditionExpression=keyCondExpr)
+                    response = self.table.query(IndexName=idx, KeyConditionExpression=keyCondExpr, Limit=limit)
                 else:
-                    response = self.table.query(KeyConditionExpression=keyCondExpr)
+                    response = self.table.query(KeyConditionExpression=keyCondExpr, Limit=limit)
 
                 # print(response['ResponseMetadata'])
 
