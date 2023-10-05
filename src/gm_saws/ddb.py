@@ -394,6 +394,34 @@ class SingleTable:
         return self.get_raw(self._getKeyValueItem_keyMap(key))
         
 
+    def _get_primary_keys(self):
+        # Extract primary table key names
+        return [t[0] for t in self.indices_keys[self.PRIMARY].values()]
+
+    def _is_primary_key(self, key: str):
+        prim_keys = self._get_primary_keys()
+        return (key in prim_keys)
+
+    def _item_2_table_row(self, item: type, primary_key_only: bool = False):
+        cls_name = item.__class__.__name__
+        if cls_name in self.entity_map:
+            table_row = {}
+            for key, value in self.entity_map[cls_name].items():
+                if primary_key_only and not self._is_primary_key(key):
+                    continue
+
+                # If expr is blank, attrib_list[0] is mapped to table 'key', otherwise, expr.format(**attrib_list)
+                expr = value[0]
+                # attrib_list can contain @ClassName in place of attribute name, e.g. [attrib1, attrib2, @ClassName, attrib3, ...]
+                attrib_list = value[1]
+
+                table_row[key] = self._get_table_field_value(item, cls_name, expr, attrib_list)
+            
+            return table_row
+        else:
+            return None
+
+
     def put_item(self, item: type, delay: int = None):
         """Add item into table based on entity-map specified during initialization.
         If delay is specified, sleeps for delay milli-seconds before returning, and this can be used to control write-capacity usage"""
@@ -407,24 +435,14 @@ class SingleTable:
         # This is now done by put_raw()
         # # Pickle the data and store
         # table_row = {'data': pickle.dumps(item)}
-        table_row = {}
+        table_row = self._item_2_table_row(item)
 
-        cls_name = item.__class__.__name__
-        if cls_name in self.entity_map:
-            for key, value in self.entity_map[cls_name].items():
-                # If expr is blank, attrib_list[0] is mapped to table 'key', otherwise, expr.format(**attrib_list)
-                expr = value[0]
-                # attrib_list can contain @ClassName in place of attribute name, e.g. [attrib1, attrib2, @ClassName, attrib3, ...]
-                attrib_list = value[1]
-
-                table_row[key] = self._get_table_field_value(item, cls_name, expr, attrib_list)
-            
-            # Add item to table
-            
+        if table_row is not None:
+            # Add item to table            
             self.put_raw(key_map=table_row, item=item, delay=delay)
         else:
-            raise ValueError(f'Map {cls_name} table before adding items')
-                
+            raise ValueError(f'Map {item.__class__.__name__} table before adding items')
+
 
     @classmethod
     def _build_QueryExpr(cls, cls_name, tbl_key, expr: str, constraints: Dict[str, QueryTerm], attribs):
@@ -477,7 +495,7 @@ class SingleTable:
             raise NotImplementedError('Queries with complex expression containing multiple attributes not supported yet.')
             
 
-    def query(self, entity: PydanticBaseModel, constraints: Dict[str, QueryTerm], limit: int = None):
+    def query(self, entity: PydanticBaseModel, constraints: Dict[str, QueryTerm], limit: int = None, get_raw_response: bool = False):
         """
         Queries the db to find entity_class instances based on conditions specified
 
@@ -572,13 +590,32 @@ class SingleTable:
 
                 # print(response['ResponseMetadata'])
 
-                # Convert to entity list and return
-                if response['ResponseMetadata']['HTTPStatusCode'] == 200 and 'Items' in response:
-                    result = []
-                    for ddb_item in response['Items']:
-                        item = self.ddb_2_item(ddb_item['data'], entity)
-                        # Add if not None
-                        if item is not None:
-                            result.append(item)
+                if get_raw_response:
+                    return response
+                else:
+                    # Convert to entity list and return
+                    return self.process_query_response(response, entity)
+                
+    def process_query_response(self, response, entity: PydanticBaseModel = None):
+        result = []
+        if response['ResponseMetadata']['HTTPStatusCode'] == 200 and 'Items' in response:
+            for ddb_item in response['Items']:
+                item = self.ddb_2_item(ddb_item['data'], entity)
+                # Add if not None
+                if item is not None:
+                    result.append(item)
 
-                    return result
+        return result
+    
+    def delete_item(self, item: type):
+        item_dict = self._item_2_table_row(item, primary_key_only=True)
+        self.delete_raw(item_dict)
+
+    def delete_raw(self, item_dict: dict) -> bool:
+        # Validate correctly specified prim-keys
+        prim_keys = set(self._get_primary_keys())
+        if (prim_keys.issubset(item_dict.keys())):
+            prim_key_dict = {k:item_dict[k] for k in prim_keys}
+            self.table.delete_item(Key=prim_key_dict)
+        else:
+            return False
