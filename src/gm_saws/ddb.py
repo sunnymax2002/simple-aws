@@ -52,11 +52,16 @@ class boto3_wrap:
     """Helper class-methods to perform common tasks using boto3"""
 
     @classmethod
-    def getDynamoDbResource(cls, kwargs = None):
+    def getDynamoDbResource(cls, kwargs = None, local_db: bool = False):
         """Returns a boto3 resource for DynamoDb service"""
 
         if kwargs is None:
-            return boto3.resource(service_name = 'dynamodb')
+            if local_db:
+                # TODO: Consider getting a config file path and read these local_db args from there
+                return boto3.resource(service_name = 'dynamodb', endpoint_url = 'http://localhost:8000',
+                                      aws_access_key_id = 'fakekeyid', aws_secret_access_key = 'fakeaccesskey')
+            else:
+                return boto3.resource(service_name = 'dynamodb')
         else:
             return boto3.resource(service_name = 'dynamodb', **kwargs)
 
