@@ -330,7 +330,28 @@ class SingleTable:
             # TODO: log error
             return None
 
-    def put_raw(self, key_map: dict, item: PydanticBaseModel, delay: int = None):
+    # REF: https://gist.githubusercontent.com/bosswissam/a369b7a31d9dcab46b4a034be7d263b2/raw/f99d210019c1fac6bb46d2da81dcdf5ef9932172/pysize.py
+    def _get_size(self, obj, seen=None):
+        """Recursively finds size of objects"""
+        size = sys.getsizeof(obj)
+        if seen is None:
+            seen = set()
+        obj_id = id(obj)
+        if obj_id in seen:
+            return 0
+        # Important mark as seen *before* entering recursion to gracefully handle
+        # self-referential objects
+        seen.add(obj_id)
+        if isinstance(obj, dict):
+            size += sum([self._get_size(v, seen) for v in obj.values()])
+            size += sum([self._get_size(k, seen) for k in obj.keys()])
+        elif hasattr(obj, '__dict__'):
+            size += self._get_size(obj.__dict__, seen)
+        elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+            size += sum([self._get_size(i, seen) for i in obj])
+        return size
+
+    def put_raw(self, key_map: dict, item: PydanticBaseModel, delay: int = None, sleep: bool=True):
         """Adds a table row based on specified key map. Pickles the item before saving and adds it to attribute=data.
         If delay is specified, sleeps for delay milli-seconds before returning, and this can be used to control write-capacity usage"""
 
@@ -340,7 +361,7 @@ class SingleTable:
         table_row['data'] = self.item_2_ddb(item)
 
         # Write to table
-        item_size = sys.getsizeof(table_row['data'])
+        item_size = self._get_size(table_row['data'])
         # print(type(item), key_map)
 
         print('Writing item into database...')
@@ -352,14 +373,19 @@ class SingleTable:
         # print(response)
         # print()
 
-        if delay is None:
-            # Auto-add delay based on size of item - larger the item, larger the delay between writes
-            # TODO: which WCU to use, min of all affected indices?
-            delay = int(item_size / self.ddb_capacity[self.PRIMARY]['wcu'])
+        auto_dly = int(item_size / self.ddb_capacity[self.PRIMARY]['wcu'])
+        if sleep:
+            if delay is None:
+                # Auto-add delay based on size of item - larger the item, larger the delay between writes
+                # TODO: which WCU to use, min of all affected indices?
+                delay = auto_dly
 
-        if delay > 0:
-            print(f'Written {type(item)} of {item_size} bytes, now sleeping for {delay} ms...')
-            time.sleep(delay / 1000)
+            if delay > 0:
+                print(f'Written {type(item)} of {item_size} bytes, now sleeping for {delay} ms...')
+                time.sleep(delay / 1000)
+        else:
+            # Doesn't sleep but suggests caller to wait for auto_dly before writing into the table again
+            return auto_dly
 
 
     def get_raw(self, key_map: dict):
