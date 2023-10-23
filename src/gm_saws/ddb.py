@@ -351,6 +351,22 @@ class SingleTable:
             size += sum([self._get_size(i, seen) for i in obj])
         return size
 
+    def sleep_to_manage_wcu(self, item_dict: dict, delay: int = None, sleep: bool=True):
+        item_size = self._get_size(item_dict)
+        auto_dly = int(item_size / self.ddb_capacity[self.PRIMARY]['wcu'])
+        if sleep:
+            if delay is None:
+                # Auto-add delay based on size of item - larger the item, larger the delay between writes
+                # TODO: which WCU to use, min of all affected indices?
+                delay = auto_dly
+
+            if delay > 0:
+                print(f'Written item of {item_size} bytes, now sleeping for {delay} ms...')
+                time.sleep(delay / 1000)
+        else:
+            # Doesn't sleep but suggests caller to wait for auto_dly before writing into the table again
+            return auto_dly
+
     def put_raw(self, key_map: dict, item: PydanticBaseModel, delay: int = None, sleep: bool=True):
         """Adds a table row based on specified key map. Pickles the item before saving and adds it to attribute=data.
         If delay is specified, sleeps for delay milli-seconds before returning, and this can be used to control write-capacity usage"""
@@ -361,7 +377,7 @@ class SingleTable:
         table_row['data'] = self.item_2_ddb(item)
 
         # Write to table
-        item_size = self._get_size(table_row['data'])
+        # item_size = self._get_size(table_row['data'])
         # print(type(item), key_map)
 
         print('Writing item into database...')
@@ -373,19 +389,20 @@ class SingleTable:
         # print(response)
         # print()
 
-        auto_dly = int(item_size / self.ddb_capacity[self.PRIMARY]['wcu'])
-        if sleep:
-            if delay is None:
-                # Auto-add delay based on size of item - larger the item, larger the delay between writes
-                # TODO: which WCU to use, min of all affected indices?
-                delay = auto_dly
+        self.sleep_to_manage_wcu(table_row, delay=delay, sleep=sleep)
+        # auto_dly = int(item_size / self.ddb_capacity[self.PRIMARY]['wcu'])
+        # if sleep:
+        #     if delay is None:
+        #         # Auto-add delay based on size of item - larger the item, larger the delay between writes
+        #         # TODO: which WCU to use, min of all affected indices?
+        #         delay = auto_dly
 
-            if delay > 0:
-                print(f'Written {type(item)} of {item_size} bytes, now sleeping for {delay} ms...')
-                time.sleep(delay / 1000)
-        else:
-            # Doesn't sleep but suggests caller to wait for auto_dly before writing into the table again
-            return auto_dly
+        #     if delay > 0:
+        #         print(f'Written {type(item)} of {item_size} bytes, now sleeping for {delay} ms...')
+        #         time.sleep(delay / 1000)
+        # else:
+        #     # Doesn't sleep but suggests caller to wait for auto_dly before writing into the table again
+        #     return auto_dly
 
 
     def get_raw(self, key_map: dict):
