@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gm_saws"
-version = "0.1.3"
+version = "0.1.4"
 description = "[Grey Matters][Simple AWS] This is a wrapper over AWS boto3 to simplify many common AWS tasks"
 readme = "README.md"
 authors = [{ name = "Sunny Gupta", email = "sunnymax2002@gmail.com" }]
