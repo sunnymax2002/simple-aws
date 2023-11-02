@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gm_saws"
-version = "0.1.4"
+version = "0.1.5"
 description = "[Grey Matters][Simple AWS] This is a wrapper over AWS boto3 to simplify many common AWS tasks"
 readme = "README.md"
 authors = [{ name = "Sunny Gupta", email = "sunnymax2002@gmail.com" }]
@@ -16,7 +16,7 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
 ]
-keywords = ["aws", "dynamodb"]
+keywords = ["aws", "dynamodb", "cognito"]
 dependencies = [
     "pydantic >= 1.10.9",
     "boto3 >= 1.26.151",
