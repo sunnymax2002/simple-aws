@@ -40,6 +40,7 @@ def GetFullPath(rel_path):
         return os.path.join(base, rel_path)
     
 def ReadConfig(secrets: bool = False, config_file_path: str = None) -> dict:
+    """Returns config read from yaml file, else an empty dict"""
     if config_file_path is None:
         # Import Config
         if secrets:
