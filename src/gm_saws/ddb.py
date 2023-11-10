@@ -61,7 +61,7 @@ class boto3_wrap:
                 return boto3.resource(service_name = 'dynamodb', endpoint_url = 'http://localhost:8000',
                                       aws_access_key_id = 'fakekeyid', aws_secret_access_key = 'fakeaccesskey')
             else:
-                return boto3.resource(service_name = 'dynamodb')
+                return boto3.resource(service_name = 'dynamodb', region_name = 'us-east-1')
         else:
             return boto3.resource(service_name = 'dynamodb', **kwargs)
 
