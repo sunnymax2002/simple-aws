@@ -373,7 +373,8 @@ class SingleTable:
         item_size = self._get_size(item_dict)
 
         # Uses min wcu across all table indices to determine wait time
-        auto_dly = int(item_size / self.min_wcu) #self.ddb_capacity[self.PRIMARY]['wcu'])
+        #Multiply by 1.5 to avoid throttling
+        auto_dly = int(item_size / self.min_wcu) * 1.5 #self.ddb_capacity[self.PRIMARY]['wcu'])
         if sleep:
             if delay is None:
                 # Auto-add delay based on size of item - larger the item, larger the delay between writes
