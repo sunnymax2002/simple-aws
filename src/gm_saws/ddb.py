@@ -104,6 +104,8 @@ class SingleTable:
 
         # DynamoDb read/write capacity units
         self.ddb_capacity: Dict[str: Dict[str, int]] = {self.PRIMARY: {'rcu': rcu, 'wcu': wcu}}
+        self.min_rcu = rcu
+        self.min_wcu = wcu
 
         # Indices and Keys
         self.indices_keys: Dict[str, Dict[KeyType, tuple]] = {self.PRIMARY: {KeyType.PARTITION_KEY: None, KeyType.SORT_KEY: None}}
@@ -126,21 +128,37 @@ class SingleTable:
         self.serializer = TypeSerializer()
         self.deserializer = TypeDeserializer()
 
+    def update_min_capacity(self, rcu, wcu):
+        if rcu is not None and self.min_rcu > rcu:
+            self.min_rcu = rcu
 
-    def add_key(self, index: str, indexType: IndexType, key: str, type: KeyType, dataType: str = STRING, rcu: int = 1, wcu: int = 1):
+        if wcu is not None and self.min_wcu > wcu:
+            self.min_wcu = wcu
+
+    def add_key(self, index: str, indexType: IndexType, key: str, type: KeyType, dataType: str = STRING, rcu: int = None, wcu: int = None):
         """Define key(type) for index. The specified key must be one of table attributes"""
 
         # TODO: how to store indexType
 
         if self.schema_locked:
             raise Exception('Schema locked for editing, recreate table with new schema')
-        
-                # DynamoDb read/write capacity units
-        self.ddb_capacity[index] = {'rcu': rcu, 'wcu': wcu}
-
 
         if index is None:
             index = self.PRIMARY
+
+        # DynamoDb read/write capacity units
+        if index not in self.ddb_capacity:
+            # Default capacity if not specified
+            self.ddb_capacity[index] = {'rcu': 1, 'wcu': 1}
+
+        # Override if specified
+        if rcu is not None:
+            self.ddb_capacity[index]['rcu'] = rcu
+        if rcu is not None:
+            self.ddb_capacity[index]['wcu'] = wcu
+
+        # Update min capacity
+        self.update_min_capacity(rcu, wcu)
 
         if index not in self.indices_keys:
             # Init dict
@@ -353,7 +371,9 @@ class SingleTable:
 
     def sleep_to_manage_wcu(self, item_dict: dict, delay: int = None, sleep: bool=True):
         item_size = self._get_size(item_dict)
-        auto_dly = int(item_size / self.ddb_capacity[self.PRIMARY]['wcu'])
+
+        # Uses min wcu across all table indices to determine wait time
+        auto_dly = int(item_size / self.min_wcu) #self.ddb_capacity[self.PRIMARY]['wcu'])
         if sleep:
             if delay is None:
                 # Auto-add delay based on size of item - larger the item, larger the delay between writes
